@@ -41,7 +41,7 @@ export default function ArticlesIndex({ articles }) {
         <title>Articles - Max Monciardini</title>
         <meta
           name="description"
-          content="I like"
+          content="I mostly write about poorly documented software topics, and things I wish I knew before I started as a developer. Other than that, I write about my life, productivity hacks, and my journey as an aspiring technical founder."
         />
       </Head>
       <SimpleLayout

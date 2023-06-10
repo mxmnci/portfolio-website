@@ -1,0 +1,650 @@
+import { ArticleLayout } from '@/components/ArticleLayout'
+import Image from 'next/image'
+import imageAddPreflightScript from './add-preflight-script.webp'
+import imageEnablePreflightScript from './enable-preflight-script.webp'
+import imageSetSharedHeaders from './set-shared-headers.webp'
+import imageEditSharedHeaders from './edit-shared-headers.webp'
+import imageSetEnvironmentVariables from './set-environment-variables.webp'
+
+export const meta = {
+  author: 'Max Monciardini',
+  date: '2023-06-10',
+  title:
+    'Automating Microsoft Active Directory OAuth in Apollo Sandbox with Scripts 🤖',
+  description:
+    'In this guide, I show you step-by-step how to automate Micrsoft Active Directory OAuth in your Apollo Sandbox environment.',
+}
+
+## Introduction
+
+Apollo Sandbox is a useful tool for testing GraphQL queries and mutations. At work, I use it every day to test out new queries and mutations before I implement them in my code.
+
+However, since our API is protected by Microsoft Active Directory OAuth, I have to manually get a token from our OAuth server and add it to the HTTP headers of my requests. This is a tedious process that I have to repeat every time my token expires.
+
+Fortunately, Apollo Sandbox has a feature called **_preflight scripts_**. Preflight scripts allow you to run a script before every request. This means that we can automate the OAuth workflow in Apollo Sandbox!
+
+Wasted time isn't something that I take lightly. Every minute I spend doing something that could be automated is a minute I could spend doing something else.
+
+In this article, I'll show you how to automate your Apollo Sandbox OAuth workflow step-by-step.
+
+## Useful Resources
+
+In my research, I discovered that this topic is not well documented. I found a few articles that explain how to automate OAuth in Apollo Sandbox, but none of them provided a complete solution.
+
+This article by the Apollo team was the most helpful, but it was not a quick copy-paste solution:
+[Automatically Authenticate with Preflight Scripts in Apollo Studio Explorer](https://www.apollographql.com/blog/announcement/tooling/automatically-authenticate-with-preflight-scripts-in-apollo-studio-explorer/)
+
+## Prerequisites
+
+This guide assumes that you already have a basic understanding of Apollo Sandbox and Microsoft Active Directory OAuth. If you don't, I recommend reading the following articles first:
+
+- [Scripting in Apollo Sandbox](https://www.apollographql.com/docs/graphos/explorer/connecting-authenticating/#custom-scripts)
+- [Microsoft Active Directory OAuth](https://docs.microsoft.com/en-us/azure/active-directory/develop/v2-oauth2-auth-code-flow)
+
+## Getting Started
+
+### Step 1: Creating the authentication script
+
+In order to automate the authentication process, we need to create a script that will run before every request. In Apollo Sandbox, this is known as a **_preflight script_**. This script will get a new token from our OAuth server and add it to the HTTP headers of our request.
+
+**Our preflight script will adhere to the following workflow:**
+
+1. Get a new set of tokens from the OAuth server (An `access token` and a `refresh token`)
+2. If the `access token` is expired, use the `refresh token` to get a new `access token` from the OAuth server
+3. If the `refresh token` is expired, redirect the user to the OAuth server to get a new `access token` and `refresh token`
+4. Save the new `access token` to the environment variables to be placed in the HTTP headers of our next request
+5. Save the new `refresh token` to the environment variables to refresh the `access token` when it expires
+
+**A breakdown of the script can be found below, but here is the entire script for quick copy/paste:**
+
+GitHub Gist: [apollo-preflight-oauth.js](https://gist.github.com/mxmnci/23690aa344e5c84940546dd5b983ae97)
+
+```js
+// Define constants OAuth server endpoints
+const ENDPOINTS = {
+  authorize:
+    'https://login.microsoftonline.com/<insert-tenant-name-here>/oauth2/v2.0/authorize',
+  token:
+    'https://login.microsoftonline.com/<insert-tenant-name-here>/oauth2/v2.0/token',
+}
+
+// OAuth client details and other configuration for the OAuth server
+const config = {
+  // The client_id of your OAuth client registered in Microsoft Azure AD
+  client_id: '<insert-client-id-here>',
+  // The tenant_id of your Azure AD tenant
+  tenant_id: '<insert-tenant-id-here>',
+  // A string value to maintain state between the request and callback
+  state: '<insert-unique-state-string-here>',
+  // The scope value indicating the permissions the app requires
+  scope: '<insert-scope-here>',
+  // The response_type value as per OAuth 2.0 specification
+  response_type: 'code',
+  // The method used to encode the code_challenge
+  code_challenge_method: 'S256',
+  // The code_challenge created by our Node.js script
+  code_challenge: explorer.environment.get('code_challenge'),
+  // The code_verifier created by our Node.js script
+  code_verifier: explorer.environment.get('code_verifier'),
+  // The URI in which the user is redirected back to after authentication
+  redirect_uri: 'https://studio.apollographql.com/explorer-oauth2',
+}
+
+// Helper function to validate configuration values
+function validateConfig(config) {
+  Object.keys(config).forEach((key) => {
+    if (!config[key]) throw new Error(`Missing config value for ${key}`)
+  })
+}
+
+/**
+ * Manages the lifecycle of tokens for the application, handling the retrieval,
+ * refresh, and validation of both access tokens and refresh tokens
+ */
+class TokenManager {
+  constructor() {
+    this.token = explorer.environment.get('token')
+    this.refreshToken = explorer.environment.get('refresh_token')
+  }
+
+  /**
+   * Get the current access token. If the current token is expired, attempt to refresh it
+   * If the refresh token is also expired, retrieve new tokens
+   * @returns {Promise<string>} The current access token
+   */
+  async getAccessToken() {
+    if (this.token && !this.isTokenExpired() && this.isValidTokenHeader()) {
+      return this.token
+    }
+
+    // If the refresh token exists, try refreshing the access token
+    if (this.refreshToken) {
+      try {
+        this.token = await this.refreshAccessToken()
+        explorer.environment.set('token', this.token)
+        return this.token
+      } catch (error) {
+        console.error('Failed to refresh access token:', error)
+      }
+    }
+
+    // If we got here, we have no tokens or refresh failed, so get new ones
+    const tokens = await this.retrieveNewTokens()
+    this.token = tokens.access_token
+    this.refreshToken = tokens.refresh_token
+    explorer.environment.set('token', this.token)
+    explorer.environment.set('refresh_token', this.refreshToken)
+    return this.token
+  }
+
+  /**
+   * Retrieve new access and refresh tokens from the OAuth server
+   * @returns {Promise<Object>} An object containing the new access and refresh tokens
+   */
+  async retrieveNewTokens() {
+    const {
+      client_id,
+      tenant_id,
+      state,
+      scope,
+      response_type,
+      code_challenge_method,
+      code_challenge,
+      code_verifier,
+      redirect_uri,
+    } = config
+
+    const { code } = await explorer.oauth2Request(ENDPOINTS.authorize, {
+      client_id,
+      state,
+      scope,
+      response_type,
+      code_challenge_method,
+      code_challenge,
+    })
+
+    const tokenResponse = await explorer.fetch(ENDPOINTS.token, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: this.constructRequestBody({
+        client_id,
+        tenant_id,
+        code,
+        code_verifier,
+        grant_type: 'authorization_code',
+        redirect_uri,
+      }),
+    })
+
+    const { access_token, refresh_token } = JSON.parse(tokenResponse.body)
+
+    return { access_token, refresh_token }
+  }
+
+  /**
+   * Refresh the current access token using the current refresh token
+   * @returns {Promise<string>} The new access token
+   * @throws {Error} If the refresh token is expired
+   */
+  async refreshAccessToken() {
+    const { client_id } = config
+
+    const tokenResponse = await explorer.fetch(ENDPOINTS.token, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: this.constructRequestBody({
+        client_id,
+        grant_type: 'refresh_token',
+        refresh_token: this.refreshToken,
+      }),
+    })
+
+    const { access_token, error } = JSON.parse(tokenResponse.body)
+
+    // If an error occurs during refresh, it is likely that the refresh token has expired
+    if (error) {
+      throw new Error(
+        'Unable to refresh access token. Refresh token may be expired.'
+      )
+    }
+
+    return access_token
+  }
+
+  /**
+   * Check if the current access token is expired
+   * @returns {boolean} True if the token is expired, false otherwise
+   */
+  isTokenExpired() {
+    const decodedAccessToken = this.parseJwt(this.token)
+    return decodedAccessToken.exp < Math.floor(Date.now() / 1000)
+  }
+
+  /**
+   * Validate the header of the current JWT token
+   * This is used to ensure that the token header isn't malformed, which could
+   * happen if the token was manually set in the environment variables
+   * @returns {boolean} True if the token header is valid, false otherwise
+   */
+  isValidTokenHeader() {
+    try {
+      const [headerBase64Url] = this.token.split('.')
+      const base64 = headerBase64Url.replace(/-/g, '+').replace(/_/g, '/')
+      const jsonPayload = decodeURIComponent(
+        atob(base64)
+          .split('')
+          .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+          .join('')
+      )
+
+      const header = JSON.parse(jsonPayload)
+      if (header.typ !== 'JWT') {
+        return false
+      }
+      if (['HS256', 'RS256'].indexOf(header.alg) === -1) {
+        return false
+      }
+      return true
+    } catch (e) {
+      return false
+    }
+  }
+
+  /**
+   * Parse a JWT token and return the decoded payload
+   * @param {string} token The JWT token to parse
+   * @returns {Object} The decoded payload of the JWT token
+   */
+  parseJwt(token) {
+    var base64Url = token.split('.')[1]
+    var base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/')
+    var jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    )
+
+    return JSON.parse(jsonPayload)
+  }
+
+  /**
+   * Convert a data object to a URL-encoded string
+   * @param {Object} data The data to send in the request body
+   * @returns {string} The data formatted as a URL-encoded string
+   */
+  constructRequestBody(data) {
+    return Object.keys(data)
+      .map((key) => `${key}=${encodeURIComponent(data[key])}`)
+      .join('&')
+  }
+}
+
+// Validate the configuration
+validateConfig(config)
+
+// Initialize the token manager and retrieve the access token
+const tokenManager = new TokenManager(config)
+await tokenManager.getAccessToken()
+```
+
+## Script Breakdown
+
+Let's go over the script and understand what it does.
+
+1. **Configuration Retrieval**
+
+The first step is to set your configuration values for your Azure AD tenant. These values are used to construct the OAuth request and token refresh requests. The `ENDPOINTS` object contains the URLs for the OAuth server endpoints. The `config` object contains the OAuth client details and other configuration for the OAuth server.
+
+I have intentionally included the entire URL in the `ENDPOINTS` configuration object so that you can quickly re-purpose this script for other OAuth providers.
+
+_We will generate the `code_challenge` and `code_verifier` in a later step using the a separate script._
+
+```js
+const ENDPOINTS = {
+  authorize:
+    'https://login.microsoftonline.com/<insert-tenant-name-here>/oauth2/v2.0/authorize',
+  token:
+    'https://login.microsoftonline.com/<insert-tenant-name-here>/oauth2/v2.0/token',
+}
+
+// OAuth client details and other configuration for the OAuth server
+const config = {
+  // The client_id of your OAuth client registered in Microsoft Azure AD
+  client_id: '<insert-client-id-here>',
+  // The tenant_id of your Azure AD tenant
+  tenant_id: '<insert-tenant-id-here>',
+  // A string value to maintain state between the request and callback
+  state: '<insert-unique-state-string-here>',
+  // The scope value indicating the permissions the app requires
+  scope: '<insert-scope-here>',
+  // The response_type value as per OAuth 2.0 specification
+  response_type: 'code',
+  // The method used to encode the code_challenge
+  code_challenge_method: 'S256',
+  // The code_challenge created by our Node.js script
+  code_challenge: explorer.environment.get('code_challenge'),
+  // The code_verifier created by our Node.js script
+  code_verifier: explorer.environment.get('code_verifier'),
+  // The URI in which the user is redirected back to after authentication
+  redirect_uri: 'https://studio.apollographql.com/explorer-oauth2',
+}
+```
+
+2. **Validate Configuration _(optional)_**
+
+I've included a helper function to validate the configuration values. This is not required, but it is a good practice to ensure that the configuration values are set before making the request.
+
+This is especially useful when you're working with teammates and you want to ensure that they have set the configuration values correctly.
+
+```js
+// Helper function to validate configuration values
+function validateConfig(config) {
+  Object.keys(config).forEach((key) => {
+    if (!config[key]) throw new Error(`Missing config value for ${key}`)
+  })
+}
+```
+
+3. **Token Manager**
+
+I've created the Token Manager class to organize the logic for fetching and refreshing the tokens. This class is responsible for:
+
+- Fetching the access token and refresh token from the OAuth server
+- Storing the access token and refresh token
+- Refreshing the access token when it expires
+- Getting a fresh set of tokens when the refresh token expires
+
+The TokenManager makes use of Apollo's `oauth2Request` and `fetch` helper functions to handle the OAuth 2.0 flow.
+
+Typically, I would use the built-in `URLSearchParams` class to construct the request body for the `fetch` function calls, but the Apollo Sandbox environment does not support Javascript browser APIs. Instead, I created a helper method called `constructRequestBody` parse an object into a URL-encoded string.
+
+Additionally, since the Apollo Sandbox environment does not support module imports (such as `jsonwebtoken`), I created a helper method called `parseJwt` to parse the JWT access token.
+
+```js
+/**
+ * Manages the lifecycle of tokens for the application, handling the retrieval,
+ * refresh, and validation of both access tokens and refresh tokens
+ */
+class TokenManager {
+  constructor() {
+    this.token = explorer.environment.get('token')
+    this.refreshToken = explorer.environment.get('refresh_token')
+  }
+
+  /**
+   * Get the current access token. If the current token is expired, attempt to refresh it
+   * If the refresh token is also expired, retrieve new tokens
+   * @returns {Promise<string>} The current access token
+   */
+  async getAccessToken() {
+    if (this.token && !this.isTokenExpired() && this.isValidTokenHeader()) {
+      return this.token
+    }
+
+    // If the refresh token exists, try refreshing the access token
+    if (this.refreshToken) {
+      try {
+        this.token = await this.refreshAccessToken()
+        explorer.environment.set('token', this.token)
+        return this.token
+      } catch (error) {
+        console.error('Failed to refresh access token:', error)
+      }
+    }
+
+    // If we got here, we have no tokens or refresh failed, so get new ones
+    const tokens = await this.retrieveNewTokens()
+    this.token = tokens.access_token
+    this.refreshToken = tokens.refresh_token
+    explorer.environment.set('token', this.token)
+    explorer.environment.set('refresh_token', this.refreshToken)
+    return this.token
+  }
+
+  /**
+   * Retrieve new access and refresh tokens from the OAuth server
+   * @returns {Promise<Object>} An object containing the new access and refresh tokens
+   */
+  async retrieveNewTokens() {
+    const {
+      client_id,
+      tenant_id,
+      state,
+      scope,
+      response_type,
+      code_challenge_method,
+      code_challenge,
+      code_verifier,
+      redirect_uri,
+    } = config
+
+    const { code } = await explorer.oauth2Request(ENDPOINTS.authorize, {
+      client_id,
+      state,
+      scope,
+      response_type,
+      code_challenge_method,
+      code_challenge,
+    })
+
+    const tokenResponse = await explorer.fetch(ENDPOINTS.token, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: this.constructRequestBody({
+        client_id,
+        tenant_id,
+        code,
+        code_verifier,
+        grant_type: 'authorization_code',
+        redirect_uri,
+      }),
+    })
+
+    const { access_token, refresh_token } = JSON.parse(tokenResponse.body)
+
+    return { access_token, refresh_token }
+  }
+
+  /**
+   * Refresh the current access token using the current refresh token
+   * @returns {Promise<string>} The new access token
+   * @throws {Error} If the refresh token is expired
+   */
+  async refreshAccessToken() {
+    const { client_id } = config
+
+    const tokenResponse = await explorer.fetch(ENDPOINTS.token, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: this.constructRequestBody({
+        client_id,
+        grant_type: 'refresh_token',
+        refresh_token: this.refreshToken,
+      }),
+    })
+
+    const { access_token, error } = JSON.parse(tokenResponse.body)
+
+    // If an error occurs during refresh, it is likely that the refresh token has expired
+    if (error) {
+      throw new Error(
+        'Unable to refresh access token. Refresh token may be expired.'
+      )
+    }
+
+    return access_token
+  }
+
+  /**
+   * Check if the current access token is expired
+   * @returns {boolean} True if the token is expired, false otherwise
+   */
+  isTokenExpired() {
+    const decodedAccessToken = this.parseJwt(this.token)
+    return decodedAccessToken.exp < Math.floor(Date.now() / 1000)
+  }
+
+  /**
+   * Validate the header of the current JWT token
+   * This is used to ensure that the token header isn't malformed, which could
+   * happen if the token was manually set in the environment variables
+   * @returns {boolean} True if the token header is valid, false otherwise
+   */
+  isValidTokenHeader() {
+    try {
+      const [headerBase64Url] = this.token.split('.')
+      const base64 = headerBase64Url.replace(/-/g, '+').replace(/_/g, '/')
+      const jsonPayload = decodeURIComponent(
+        atob(base64)
+          .split('')
+          .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+          .join('')
+      )
+
+      const header = JSON.parse(jsonPayload)
+      if (header.typ !== 'JWT') {
+        return false
+      }
+      if (['HS256', 'RS256'].indexOf(header.alg) === -1) {
+        return false
+      }
+      return true
+    } catch (e) {
+      return false
+    }
+  }
+
+  /**
+   * Parse a JWT token and return the decoded payload
+   * @param {string} token The JWT token to parse
+   * @returns {Object} The decoded payload of the JWT token
+   */
+  parseJwt(token) {
+    var base64Url = token.split('.')[1]
+    var base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/')
+    var jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    )
+
+    return JSON.parse(jsonPayload)
+  }
+
+  /**
+   * Convert a data object to a URL-encoded string
+   * @param {Object} data The data to send in the request body
+   * @returns {string} The data formatted as a URL-encoded string
+   */
+  constructRequestBody(data) {
+    return Object.keys(data)
+      .map((key) => `${key}=${encodeURIComponent(data[key])}`)
+      .join('&')
+  }
+}
+```
+
+4. **Main Authentication Flow**
+
+The main authentication flow is responsible for orchestrating the authentication process. It uses the Token Manager class to fetch the tokens and add save them in an environment variable for later use.
+
+```js
+// Validate the configuration
+validateConfig(config)
+
+// Initialize the token manager and retrieve the access token
+const tokenManager = new TokenManager(config)
+await tokenManager.getAccessToken()
+```
+
+## Putting the script into action
+
+Now that we have our script ready, let's put it into action. We'll configure a preflight script in Apollo Sandbox that will run the authentication flow before each request.
+
+1. **Configure the preflight script**
+
+To configure the preflight script, go to the **Settings** tab in Apollo Sandbox and scroll down to the **Preflight Script** section. Paste the following code into the text area:
+
+<Image src={imageAddPreflightScript} />
+
+After clicking **Add Script** an editor will pop up. Copy/paste your preflight script into the editor and click **Save**.
+
+Lastly, make sure that you enable the preflight script by checking the **Preflight Script** slider.
+
+<Image src={imageEnablePreflightScript} />
+
+2. **Configure Shared Headers**
+
+Now the you have configured the preflight script, you need to set **Shared Headers**. Shared headers are global request headers that are sent in every GraphQL operation. In this instance, we are going to use them to send our token with our GraphQL request.
+
+You can set the Shared Headers by clicking the **Set shared headers** button at the bottom of your request window:
+
+<Image src={imageSetSharedHeaders} />
+
+After opening the Shared headers editor, set the following headers:
+
+<Image src={imageEditSharedHeaders} />
+
+Please note that the exact header names may vary depending on how authentication is configured on your GraphQL server.
+
+3. **Setting your environment variables**
+
+OAuth 2.0 requires a `code_verifier` and `code_challenge` to be generated before the authentication flow can begin. The `code_verifier` is a cryptographically random string that is used to generate the `code_challenge`. The `code_challenge` is a URL-safe string that is sent to the OAuth server to initiate the authentication flow. The `code_verifier` is then used to verify the `code_challenge` when the OAuth server returns the access token.
+
+Unfortunately, since the Apollo Sandbox doesn't support the Javascript's Web/Node APIs, we are unable to make use of the `crypto` module to generate a `code_challenge` and `code_verifier` within our script.
+
+Instead, I have created a simple script to generate them within a Node.js REPL.
+
+Run this script in your Node.js interpreter (REPL) to generate your environment variables _(Hint: You can use editor mode to paste this entire command)_:
+
+```js
+const crypto = require('crypto')
+
+function base64URLEncode(str) {
+  return str
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '')
+}
+
+function sha256(buffer) {
+  return crypto.createHash('sha256').update(buffer).digest()
+}
+
+let code_verifier = base64URLEncode(crypto.randomBytes(32))
+console.log('code_verifier:', code_verifier)
+console.log('code_challenge:', base64URLEncode(sha256(code_verifier)))
+```
+
+Finally, update your environment variables with the generated values:
+
+<Image src={imageSetEnvironmentVariables} />
+
+## That's it!
+
+As mentioned above, this header will append the token onto every request that is sent to our GraphQL API. The double curly braces used by \{\{token\}\} tells Apollo to replace it with the environment variable named token.
+
+That's it! At this point you should now be able to make authenticated requests to your GraphQL API from your Apollo Sandbox.
+
+## Conclusion
+
+To sum it up, we've created a script that automates the OAuth process in Apollo Sandbox, helping us save valuable time and eliminate manual effort. This script fetches the tokens from the OAuth server, adds them to the HTTP headers of our request, and refreshes the tokens when they're expired.
+
+I hope this guide was helpful and will improve your workflow. Even a small amount of time saved, when repeated many times, can turn into a significant advantage. Work smart, not hard!
+
+As always, if you run into any issues or have any questions, don't hesitate to reach out to me.
+
+And until next time, Happy Coding!
+
+export default (props) => <ArticleLayout meta={meta} {...props} />
