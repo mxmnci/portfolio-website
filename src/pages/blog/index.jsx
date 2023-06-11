@@ -43,7 +43,7 @@ export default function ArticlesIndex({ articles }) {
         />
       </Head>
       <SimpleLayout
-        title="My writing on software, productivity, and my life."
+        title="📝 My writing on software, productivity, and my life"
         intro="I mostly write about poorly documented software topics, and things I wish I knew before I started as a developer. Other than that, I write about my life, productivity hacks, and my journey as an aspiring technical founder."
       >
         <div className="md:border-l md:border-zinc-100 md:pl-6 md:dark:border-zinc-700/40">

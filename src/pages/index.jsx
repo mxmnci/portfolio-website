@@ -239,7 +239,9 @@ export default function Home({ articles }) {
       <Container className="mt-9">
         <div className="max-w-2xl">
           <h1 className="text-4xl font-bold tracking-tight text-zinc-800 dark:text-zinc-100 sm:text-5xl">
-            <span className="block xl:inline">Hi 👋, I&apos;m Max.</span>
+            <span className="block xl:inline">
+              Hi 👋,&nbsp;&nbsp;I&apos;m Max
+            </span>
             <br />
             <span className="block text-zinc-600 dark:text-zinc-400 xl:inline">
               I build things for the web and talk about the latest tech
