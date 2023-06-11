@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import Head from 'next/head'
 import { useRouter } from 'next/router'
 
@@ -5,6 +6,7 @@ import { Container } from '@/components/Container'
 import { Prose } from '@/components/Prose'
 import { formatDate } from '@/lib/formatDate'
 import Comments from '@/components/Comments'
+import useSaveScrollPosition from '@/hooks/use-save-scroll-position'
 
 function ArrowLeftIcon(props) {
   return (
@@ -26,6 +28,7 @@ export function ArticleLayout({
   previousPathname,
 }) {
   let router = useRouter()
+  useSaveScrollPosition()
 
   if (isRssFeed) {
     return children

@@ -9,9 +9,7 @@ function Article({ article }) {
   return (
     <article className="md:grid md:grid-cols-4 md:items-baseline">
       <Card className="md:col-span-3">
-        <Card.Title href={`/blog/${article.slug}`}>
-          {article.title}
-        </Card.Title>
+        <Card.Title href={`/blog/${article.slug}`}>{article.title}</Card.Title>
         <Card.Eyebrow
           as="time"
           dateTime={article.date}
@@ -26,7 +24,7 @@ function Article({ article }) {
       <Card.Eyebrow
         as="time"
         dateTime={article.date}
-        className="mt-1 hidden md:block"
+        className="hidden mt-1 md:block"
       >
         {formatDate(article.date)}
       </Card.Eyebrow>
@@ -49,7 +47,7 @@ export default function ArticlesIndex({ articles }) {
         intro="I mostly write about poorly documented software topics, and things I wish I knew before I started as a developer. Other than that, I write about my life, productivity hacks, and my journey as an aspiring technical founder."
       >
         <div className="md:border-l md:border-zinc-100 md:pl-6 md:dark:border-zinc-700/40">
-          <div className="flex max-w-3xl flex-col space-y-16">
+          <div className="flex flex-col max-w-3xl space-y-16">
             {articles.map((article) => (
               <Article key={article.slug} article={article} />
             ))}
