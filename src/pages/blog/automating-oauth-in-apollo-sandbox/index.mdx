@@ -595,6 +595,8 @@ After opening the Shared headers editor, set the following headers:
 
 <Image src={imageEditSharedHeaders} />
 
+This header will append the token onto every request that is sent to our GraphQL API. The double curly braces used by \{\{token\}\} tells Apollo to replace it with the environment variable named token.
+
 Please note that the exact header names may vary depending on how authentication is configured on your GraphQL server.
 
 3. **Setting your environment variables**
@@ -633,9 +635,7 @@ Finally, update your environment variables with the generated values:
 
 ## That's it!
 
-As mentioned above, this header will append the token onto every request that is sent to our GraphQL API. The double curly braces used by \{\{token\}\} tells Apollo to replace it with the environment variable named token.
-
-That's it! At this point you should now be able to make authenticated requests to your GraphQL API from your Apollo Sandbox.
+At this point you should now be able to make authenticated requests to your GraphQL API from your Apollo Sandbox.
 
 ## Conclusion
 
