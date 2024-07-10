@@ -9,6 +9,7 @@ import { Container } from '@/components/Container'
 import { GitHubIcon, LinkedInIcon, TwitterIcon } from '@/components/SocialIcons'
 import logoPrimeHomeSolutions from '@/images/logos/prime-home-solutions.svg'
 import logoCentralValleyEngineeringAndAsphalt from '@/images/logos/central-valley-engineering-and-asphalt.png'
+import logoColosseum from '@/images/logos/colosseum.svg'
 import image1 from '@/images/photos/image-1.jpg'
 import image2 from '@/images/photos/image-2.jpg'
 import image3 from '@/images/photos/image-3.png'
@@ -17,6 +18,7 @@ import image5 from '@/images/photos/image-5.jpg'
 import { formatDate } from '@/lib/formatDate'
 import { generateRssFeed } from '@/lib/generateRssFeed'
 import { getAllArticles } from '@/lib/getAllArticles'
+import { cn } from '@/util/style'
 
 function MailIcon(props) {
   return (
@@ -130,14 +132,19 @@ function Newsletter() {
 function Resume() {
   let resume = [
     {
+      company: 'Colosseum',
+      title: 'Full Stack Developer',
+      logo: logoColosseum,
+      start: '2024',
+      end: 'Present',
+      imageBackground: 'bg-black dark:bg-black',
+    },
+    {
       company: 'Prime Home Solutions',
       title: 'Lead Software Developer',
       logo: logoPrimeHomeSolutions,
       start: '2022',
-      end: {
-        label: 'Present',
-        dateTime: new Date().getFullYear(),
-      },
+      end: '2024',
     },
     {
       company: 'Central Valley Engineering & Asphalt',
@@ -157,7 +164,12 @@ function Resume() {
       <ol className="mt-6 space-y-4">
         {resume.map((role, roleIndex) => (
           <li key={roleIndex} className="flex gap-4">
-            <div className="relative mt-1 flex h-10 w-10 flex-none items-center justify-center rounded-full shadow-md shadow-zinc-800/5 ring-1 ring-zinc-900/5 dark:border dark:border-zinc-700/50 dark:bg-zinc-800 dark:ring-0">
+            <div
+              className={cn(
+                'relative mt-1 flex h-10 w-10 flex-none items-center justify-center rounded-full shadow-md shadow-zinc-800/5 ring-1 ring-zinc-900/5 dark:border dark:border-zinc-700/50 dark:bg-zinc-800 dark:ring-0',
+                role.imageBackground,
+              )}
+            >
               <Image src={role.logo} alt="" className="h-7 w-7" unoptimized />
             </div>
             <dl className="flex flex-auto flex-wrap gap-x-2">
