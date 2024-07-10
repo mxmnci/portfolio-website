@@ -33,7 +33,7 @@ export async function generateRssFeed() {
     let html = ReactDOMServer.renderToStaticMarkup(
       <MemoryRouterProvider>
         <article.component isRssFeed />
-      </MemoryRouterProvider>
+      </MemoryRouterProvider>,
     )
 
     feed.addItem({

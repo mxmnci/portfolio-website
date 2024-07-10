@@ -208,7 +208,7 @@ class TokenManager {
     // If an error occurs during refresh, it is likely that the refresh token has expired
     if (error) {
       throw new Error(
-        'Unable to refresh access token. Refresh token may be expired.'
+        'Unable to refresh access token. Refresh token may be expired.',
       )
     }
 
@@ -238,7 +238,7 @@ class TokenManager {
         atob(base64)
           .split('')
           .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-          .join('')
+          .join(''),
       )
 
       const header = JSON.parse(jsonPayload)
@@ -266,7 +266,7 @@ class TokenManager {
       atob(base64)
         .split('')
         .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-        .join('')
+        .join(''),
     )
 
     return JSON.parse(jsonPayload)
@@ -477,7 +477,7 @@ class TokenManager {
     // If an error occurs during refresh, it is likely that the refresh token has expired
     if (error) {
       throw new Error(
-        'Unable to refresh access token. Refresh token may be expired.'
+        'Unable to refresh access token. Refresh token may be expired.',
       )
     }
 
@@ -507,7 +507,7 @@ class TokenManager {
         atob(base64)
           .split('')
           .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-          .join('')
+          .join(''),
       )
 
       const header = JSON.parse(jsonPayload)
@@ -535,7 +535,7 @@ class TokenManager {
       atob(base64)
         .split('')
         .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-        .join('')
+        .join(''),
     )
 
     return JSON.parse(jsonPayload)
